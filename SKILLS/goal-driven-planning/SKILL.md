@@ -29,16 +29,7 @@ hooks:
           command: "if [ -f .task_state/task_plan.md ]; then UNRESOLVED=$(grep -c 'in_progress\\|pending' .task_state/task_plan.md 2>/dev/null || echo 0); echo \"[goal-driven-planning] 会话结束 — task_plan.md 中仍有 ${UNRESOLVED} 个 in_progress/pending 阶段。注意：TodoWrite 队列是会话级内存，下次会话恢复时请先读三文件，再用 TodoWrite 重建当前阶段的执行队列。\"; fi"
 ---
 
-> 本 skill 依赖 opencode 与 Claude Code 兼容的 hooks，并配合 opencode 内置的 `TodoWrite`。Hooks 在四个触点把 task_plan.md 推回上下文，TodoWrite 负责实时动作队列；两者职责互补不重叠。
-
 # Goal-Driven Planning
-
-## 范式
-
-- 旧：用提示词文本指挥模型工作（"你应该…"），靠模型自觉
-- 新：模型用 TodoWrite 提醒自己工作。SKILL 只规定"在 X 时机往 TodoWrite push Y todo"，纪律执行交给 TodoWrite 状态机
-
-把易失的提示词文本换成 environment-managed、压缩里保住、用户可见、勾选才能推进的状态机，纪律就变得可观测、可强制、可追溯。
 
 三层各司其职：上下文窗口（易失内存）、文件系统（持久磁盘）、TodoWrite（会话级动作队列）。所有阶段、动作、决策、错误处理都从**目标**反推。
 
@@ -46,9 +37,9 @@ hooks:
 
 | 层 | 载体 | 装什么 | 不装什么 | 生命周期 |
 |---|---|---|---|---|
-| 持久知识 | `.task_state/*.md` 三文件 | 目标 / 成功标准 / 阶段 milestone / 决策（带 D-NNN ID）/ 错误台账（带 E-NNN ID）/ 探索结论 / 测试日志 / **关键事件 checkpoint** | 实时动作清单 | 跨会话、跨 /clear |
-| 实时动作 | opencode TodoWrite | 当前阶段细粒度动作（每条 = 一个可兑现动作，可覆盖多个工具或一次 sub-agent 调度） | 知识、目标、决策 | 当前会话；/clear 后从三文件重建 |
-| 注意力推送 | hooks（PreToolUse 注入 task_plan 头部） | 自动化提醒 | — | 工具触发瞬间 |
+| 持久知识 | `.task_state/*.md` 三文件 | 目标 / 成功标准 / 阶段 milestone / 决策（带 D-NNN ID）/ 错误台账（带 E-NNN ID）/ 探索结论 / 测试日志 / **关键事件 checkpoint** | 实时动作 / 外部内容 | 跨会话、跨 /clear |
+| 实时动作 | TodoWrite | 当前阶段细粒度动作（每条 = 一个可兑现动作，可覆盖多个工具或一次 sub-agent 调度） | 知识、目标、决策 | 当前会话；/clear 后从三文件重建 |
+| 注意力推送 | hooks | 自动化提醒 | — | 工具触发瞬间 |
 
 铁律：
 
@@ -61,10 +52,8 @@ hooks:
 | 文件 | 用途 | 写入者 | 信任级别 |
 |---|---|---|---|
 | `.task_state/task_plan.md` | 目标 / 成功标准 / 阶段 milestone / 决策 / 错误台账 | 只 main | 高（被反复读取） |
-| `.task_state/findings.md` | 代码探索结果 / 外部文档 / 网页内容 / 隔离区 | main 或 explore→main 沉淀 | 低（外部内容隔离） |
+| `.task_state/findings.md` | 代码探索结果 / 外部文档 / 网页内容 / 隔离区 | main 或 explore→main 沉淀 | 低（外部内容隔离，不进 task_plan） |
 | `.task_state/progress.md` | **关键事件 checkpoint** + 测试结果摘要 + 错误回流摘要 + 五问重启答案 | main 主写；sub-agent 仅在输出中提供可选 `checkpoint_hint` | 中 |
-
-外部网页 / 搜索结果 / mcp 不可信内容只能写 findings.md，永远不进 task_plan.md。task_plan 是高频读取目标，污染会被反复放大。
 
 > progress.md 是关键事件日志，不是流水账。它只保留 60 天后仍能帮助恢复任务状态或解释回流决策的 checkpoint；普通工具调用、成功 explore / implement 返回、hook 提醒、纯状态推进不写。详见 §5.5。
 
@@ -83,7 +72,7 @@ TodoWrite:
   - [pending] 复杂度自检（4 信号），决定是否走规划路径
   - [pending] 若命中 → mkdir -p .task_state/ + 复制三模板
   - [pending] 在 task_plan.md 顶部填目标 + 成功标准（未填禁下一步）
-  - [pending] mempalace_search 查历史决策 / pitfalls
+  - [pending] 持久记忆查询：查历史决策 / pitfalls
 ```
 
 #### 阶段恢复（/clear 后或新会话进入已有 .task_state/）
@@ -113,7 +102,7 @@ TodoWrite:
 ```
 TodoWrite:
   - [pending] 列 ≥2 种方案（写入 task_plan.md「决策」段）
-  - [pending] 对每个目标符号跑 gitnexus_impact 评估爆炸半径
+  - [pending] 对每个目标符号跑 影响分析工具评估爆炸半径
   - [pending] 选定方案并填阶段 3 任务列表
 ```
 
@@ -134,7 +123,7 @@ TodoWrite:
 TodoWrite:
   - [pending] 调度 @patcher 清理残留 + 跑全量测试
   - [pending] 确认 .task_state/ 已被清理
-  - [pending] 写决策摘要到 mempalace（wing=任务名/room=decisions）
+  - [pending] 写决策摘要到 持久记忆（写入任务决策摘要）
 ```
 
 ### 3.2 动态插入触发器
@@ -209,11 +198,9 @@ cp ${CLAUDE_PLUGIN_ROOT}/templates/progress.md   .task_state/progress.md
 
 操作上：在 TodoWrite 插一条 "重读 task_plan 目标段" todo，标 in_progress，读完标 completed，再开始决策。
 
-理由：长任务的注意力会被最近输入主导，目标会"漂移"。重读把目标重新拉回当前 token 窗口，TodoWrite 把"重读"这个动作变成强制 checkbox。
+### 5.2 落盘规则
 
-### 5.2 两步落盘规则
-
-每执行 2 次「探索类操作」（grep / glob / gitnexus_query / webfetch / 大文件读取）后，必须在 TodoWrite 插一条 "把关键发现写入 findings.md" 并立即执行。
+探索类操作（grep / glob / 代码查询 / webfetch / 大文件读取）产生**可复用的关键发现**时，必须在 TodoWrite 插一条 "把关键发现写入 findings.md" 并立即执行。纯验证性查询（已知答案的确认）不落盘。
 
 ### 5.3 三次失败协议（绝不重复失败）
 
@@ -340,31 +327,7 @@ opencode 的 sub-agent 权限是粗粒度的；只读 sub-agent（explore / veri
 
 ## 10. 与 main 工作流的对接
 
-main 的 5 步工作流（Observe → Plan → Act → Verify → Reflect）与本 skill 的对接：
-
-```
-任务进入 main
-  ↓
-[Observe] 复杂度自检 → 命中则初始化 / 恢复 .task_state/
-          TodoWrite push 阶段 0 标准清单（§3.1）
-  ↓
-[Plan]    填 task_plan.md：目标 / 成功标准 / 阶段 milestone
-          TodoWrite push 阶段 2 标准清单
-  ↓
-[Act]     按 TodoWrite 顺序：调度 explore → 落盘 findings.md
-                              调度 implement → 仅关键事件写 progress.md checkpoint
-          每完成一条 todo 立即标 completed
-  ↓
-[Verify]  TodoWrite: 调度 verify → 落盘 progress.md checkpoint（测试结果）
-                                 → 失败时落盘 task_plan.md 错误台账
-                                 → 决定回流方向并 push 新 todo
-  ↓
-[Reflect] 决策前 TodoWrite 插一条 "重读 task_plan 目标段"
-          阶段所有 TodoWrite 完成 → 勾掉 task_plan 阶段 milestone
-  ↓
-[最后]    patcher 阶段清理 .task_state/（不进 patch）
-          mempalace 写决策摘要
-```
+§3.1 各阶段模板已定义完整执行流程，§5 执行期纪律定义行为约束，此处不重复。main 的 Observe → Plan → Act → Verify → Reflect 五步循环对应：复杂度自检（§4）→ 填 task_plan（§3.1 阶段 0）→ 按 TodoWrite 执行（§3.1 阶段 1-4）→ 调度 verify（§3.1 阶段 3）→ 决策前重读目标（§5.1）。
 
 ## 11. 模板
 
