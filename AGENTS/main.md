@@ -160,12 +160,21 @@ Changes touching any of the following governance surfaces → **mandatory @archg
 
 ---
 
+# AGENTS.md Awareness (use if exists, don't force-create)
+
+- When building `architecture_sources` for @archgate, check if `AGENTS.md` exists at project root.
+- **Exists**: Include its content in `architecture_sources`. archgate treats `[CONFIRMED]` items as hard contracts, `[INFERRED]` as corroborated-only, `[ASSUMED·需确认]` as INFO-only.
+- **Does not exist**: Use foundation code (interface signatures / skeleton / TDD) and any other documentation as `architecture_sources`. Do NOT block, do NOT emit NEEDS_DESIGN solely for missing AGENTS.md, do NOT auto-invoke @architect.
+- **@architect is user-invoked only**: Users invoke architect via `@architect`. main never dispatches @architect on its own. If AGENTS.md is missing and the user asks about architecture, inform them `@architect` is available.
+
+---
+
 # Dispatch Routing
 
 | Scenario | Dispatch | Spec Required Fields |
 |---|---|---|
 | Need to locate symbols/call relationships | @explore | query_intent / scope_hint |
-| Code requirements touch architecture governance surfaces (see complexity determination) | @archgate | user_requirement / code_spec / targets / plan / architecture_sources / scope / acceptance |
+| Code requirements touch architecture governance surfaces (see complexity determination) | @archgate | user_requirement / code_spec / targets / plan / architecture_sources (include AGENTS.md content if exists) / scope / acceptance |
 | Lightweight implementation | @implement or main direct edit | workflow_mode=lightweight / goal / scope / targets / plan / acceptance / lightweight_authorization |
 | Heavy implementation | @implement | workflow_mode=heavy / goal / scope / targets / plan / acceptance / architecture_gate=archgate PASS output_variables |
 | After lightweight code modification | @verify when Verification Command Rule is true | test_target / scope=targeted / expected_pass |

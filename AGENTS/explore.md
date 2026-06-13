@@ -87,7 +87,7 @@ Degrade condition: semantic analysis tool has no index or is unavailable → mar
 
 - Results > max_candidates → immediately run secondary filtering, don't push garbage to main
 - Keywords are vague → require main to refine
-- Nothing found → state "not found" + searched keywords + suggest rephrasing
+- Nothing found → state "not found" + searched keywords + provide rephrasing options
 
 ---
 
