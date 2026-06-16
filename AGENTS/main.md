@@ -21,7 +21,23 @@ Classify every code task into exactly one mode before dispatch.
 | Mode | Use When | Default Flow |
 |---|---|---|
 | `lightweight` | All lightweight conditions below are true | main direct edit allowed; or dispatch `@implement` with `workflow_mode=lightweight`; run targeted verify when the Verification Command Rule is true |
-| `heavy` | Any heavy signal below is true | constraints → archgate → implement → verify → review → integration test → patcher |
+| `heavy` | Any heavy signal below is true, single coherent WP | constraints → archgate → implement → verify → review → integration test → patcher |
+| `dag` | Multi-phase, fan-out, unknown-size discovery, or ≥2 parallel WPs | dispatch `@dag` with goal/scope/task_type/depth; DAG engine tracks state, not main |
+
+## DAG Mode trigger (replaces linear multi-step tracking)
+
+Dispatch `@dag` instead of manually sequencing multiple sub-agents when ANY is true:
+
+| Signal | Example |
+|---|---|
+| Multi-phase pipeline | understand → design → implement → review as one orchestration |
+| Fan-out / parallel work | review N files across M dimensions in parallel |
+| Unknown-size discovery | "find all bugs", "audit", "migrate every site" — size unknown upfront |
+| ≥2 independent WPs | work that would otherwise need multiple sequential dispatches |
+| Loop-until-dry / loop-until-count | keep spawning finders until K empty rounds or N confirmed |
+| Adversarial / judge panel verify | findings need N independent skeptics to survive |
+
+When in `dag` mode: main does NOT track steps via task_plan — the DAG node graph IS the plan, and `dagworker` IS the state tracker. main's role reduces to: (1) frame goal/scope/depth, (2) dispatch `@dag`, (3) consume consolidated results on completion.
 
 ## Lightweight Conditions (all required)
 
@@ -35,7 +51,7 @@ Classify every code task into exactly one mode before dispatch.
 | Dependencies | No new runtime dependency, package, service, storage location, or process boundary |
 | Work packages | Exactly one work package |
 
-- Lightweight tasks do not trigger archgate, documentation workflows, TDD, `.task_state/`, review, integration tests, or patcher.
+- Lightweight tasks do not trigger archgate, documentation workflows, TDD, DAG dispatch, review, integration tests, or patcher.
 - A two-file task remains lightweight only when file #2 is a direct pair of file #1: same basename test file, same component stylesheet, or config file explicitly named by the user.
 - If any lightweight condition becomes false during execution, stop editing and reclassify to `heavy`.
 
@@ -124,20 +140,24 @@ Documents are the initial carrier of constraints; code is the final carrier. Doc
 
 | Allowed | Forbidden |
 |---|---|
-| Write .task_state/task_plan.md (decisions/ledger) | Directly edit/write business code (→ implement) |
-| Write .task_state/progress.md (key checkpoints) | Run full test suites (→ patcher) |
-| Write/regress constraint documents (per document lifecycle rules) | Non-requirement-driven document growth |
-| Write to persistent memory (task completion/trap discovery) | Skip verify or review and go to patcher |
-| Dispatch any sub-agent | — |
+| Dispatch `@dag` for complex multi-phase/parallel work | Directly edit/write business code (→ implement) |
+| Dispatch `@explore` / `@archgate` / `@implement` / `@verify` / `@review` / `@patcher` for single-WP heavy/lightweight tasks | Run full test suites (→ patcher) |
+| Write/regress constraint documents (per document lifecycle rules) | Track multi-step work via task_plan/progress files — **use `@dag` instead** |
+| Write to persistent memory (task completion/trap discovery) | Non-requirement-driven document growth |
+| | Skip verify or review and go to patcher |
 
 ---
 
 # Complexity Determination
 
-Any heavy signal triggered → create `.task_state/` and follow the heavy workflow path:
+Classify by the first matching heavy signal. Multi-phase/fan-out/unknown-size routes to DAG mode; the rest follow the linear heavy path. State tracking differs by mode:
+
+- **DAG mode**: `dagworker` node graph is the state tracker — no file-based plan.
+- **Linear heavy**: decisions/ledger carried in dispatch specs and memory; do NOT maintain a parallel `.task_state/` plan file.
 
 | Heavy Signal | Condition |
 |---|---|
+| Multi-phase / fan-out / unknown-size | → DAG mode (dispatch `@dag`), NOT linear heavy |
 | Many independent edits | `plan.length >= 3`, or `scope.allow.length >= 3`, or changed files have different top-level directories under `src/`, `packages/`, `apps/`, or `test/` |
 | Deep exploration | First search returns `> 5` candidate files/symbols, or the direct target file does not contain the symbol named in `targets`, or call tracing crosses `> 2` files |
 | High risk | Modifies public API, persistence/schema, security/permission behavior, or symbols called from `>= 3` locations |
@@ -173,10 +193,11 @@ Changes touching any of the following governance surfaces → **mandatory @archg
 
 | Scenario | Dispatch | Spec Required Fields |
 |---|---|---|
+| Multi-phase / fan-out / unknown-size / ≥2 parallel WPs / loop-until-dry | @dag | goal / scope / task_type / depth / constraints / available_workers |
 | Need to locate symbols/call relationships | @explore | query_intent / scope_hint |
 | Code requirements touch architecture governance surfaces (see complexity determination) | @archgate | user_requirement / code_spec / targets / plan / architecture_sources (include AGENTS.md content if exists) / scope / acceptance |
 | Lightweight implementation | @implement or main direct edit | workflow_mode=lightweight / goal / scope / targets / plan / acceptance / lightweight_authorization |
-| Heavy implementation | @implement | workflow_mode=heavy / goal / scope / targets / plan / acceptance / architecture_gate=archgate PASS output_variables |
+| Heavy implementation (single coherent WP) | @implement | workflow_mode=heavy / goal / scope / targets / plan / acceptance / architecture_gate=archgate PASS output_variables |
 | After lightweight code modification | @verify when Verification Command Rule is true | test_target / scope=targeted / expected_pass |
 | After heavy code modification | @verify | test_target / scope / expected_pass |
 | After heavy verify PASS | @review | changed_files / diff / spec_goal / verify_status=PASS |
@@ -269,6 +290,7 @@ When sub-agent returns BLOCKED, choose one of three (auto-judged):
 |---|---|
 | Prefer semantic analysis tools for code understanding | Using grep/glob when semantic tools exist for symbol definition/call relationships |
 | Always run impact before changes | Editing public symbols without impact analysis (upstream caller count) |
+| Use `@dag` for multi-step orchestration | Manually sequencing ≥3 sub-agent dispatches for parallel/unknown-size work; or tracking multi-WP state in files |
 | Background tasks are non-blocking | Starting task(background) or background sandbox then idly waiting for completion without parallelizing independent WPs/steps; only use task_status/sandbox_status when results are needed |
 | Query memory at task start | Dispatching without querying persistent memory |
 | Write memory on phase close | WP completed or trap discovered without writing to persistent memory |
@@ -296,7 +318,7 @@ When sub-agent returns BLOCKED, choose one of three (auto-judged):
 
 - ❌ Heavy workflow: skip verify and go directly to assembly
 - ❌ Heavy workflow: skip review and go directly to assembly
-- ❌ Heavy workflow: skip integration test and go directly to patcher
+- ❌ Heavy workflow: skip integration test and go to patcher
 - ❌ Enter patcher despite review BLOCKING
 - ❌ Dispatch verify before implement completes TDD
 - ❌ Heavy workflow: skip archgate and directly dispatch implement
@@ -311,6 +333,6 @@ When sub-agent returns BLOCKED, choose one of three (auto-judged):
 - ❌ Grep for hours yourself (→ explore)
 - ❌ Modify tests when they fail (unless the test itself is wrong and user confirms)
 - ❌ Incidentally refactor unrelated code
-- ❌ Stuff decisions/ledger into TodoWrite (→ task_plan.md)
-- ❌ Write success-return logs in progress.md
+- ❌ Track multi-step / multi-WP work via task_plan/progress files — **dispatch `@dag` instead; the DAG node graph is the plan, `dagworker` is the state tracker**
+- ❌ Manually sequence ≥3 sub-agent dispatches for parallel/unknown-size work when `@dag` can encode it as one orchestration
 - ❌ Throw BLOCKED directly to user (self-evaluate the three choices first)
